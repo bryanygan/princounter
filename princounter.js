@@ -2,7 +2,7 @@ require('dotenv').config();
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const TARGET_CHANNEL_ID = process.env.CHANNEL_ID;
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 
 // Define slash command for point overrides
 const setpointsCommand = new SlashCommandBuilder()
@@ -20,7 +20,11 @@ const setpointsCommand = new SlashCommandBuilder()
 // Define slash command for checking user’s points
 const checkpointsCommand = new SlashCommandBuilder()
   .setName('checkpoints')
-  .setDescription('Show your current point total');
+  .setDescription('Show your current point total')
+  .addUserOption(option =>
+    option.setName('user')
+      .setDescription('Optional: user to check points for')
+      .setRequired(false));
 const { QuickDB } = require('quick.db');
 const db = new QuickDB();
 
@@ -81,18 +85,23 @@ client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === 'setpoints') {
     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-      return interaction.reply({ content: '❌ You do not have permission to use this command.', ephemeral: true });
+      return interaction.reply({ content: '❌ You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
     const targetUser = interaction.options.getUser('user');
     const overridePoints = interaction.options.getInteger('points');
     await db.set(`points.${targetUser.id}`, overridePoints);
-    await interaction.reply({ content: `🔧 Set <@${targetUser.id}>'s points to **${overridePoints}**.`, ephemeral: true });
+    await interaction.reply({ content: `🔧 Set <@${targetUser.id}>'s points to **${overridePoints}**.`, flags: MessageFlags.Ephemeral });
   }
   if (interaction.commandName === 'checkpoints') {
-    const userId = interaction.user.id;
-    const points = (await db.get(`points.${userId}`)) || 0;
+    const targetUser = interaction.options.getUser('user') || interaction.user;
+    if (targetUser.id !== interaction.user.id && 
+        !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.reply({ content: '❌ You do not have permission to check others’ points.', flags: MessageFlags.Ephemeral });
+    }
+    const points = (await db.get(`points.${targetUser.id}`)) || 0;
     const plural = points === 1 ? 'point' : 'points';
-    await interaction.reply({ content: `You have **${points}** ${plural}.`, ephemeral: true });
+    const mention = targetUser.id === interaction.user.id ? 'You have' : `<@${targetUser.id}> has`;
+    await interaction.reply({ content: `${mention} **${points}** ${plural}.`, flags: MessageFlags.Ephemeral });
   }
 });
 
