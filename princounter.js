@@ -17,6 +17,10 @@ const setpointsCommand = new SlashCommandBuilder()
       .setDescription('Number of points to set')
       .setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+// Define slash command for checking user’s points
+const checkpointsCommand = new SlashCommandBuilder()
+  .setName('checkpoints')
+  .setDescription('Show your current point total');
 const { QuickDB } = require('quick.db');
 const db = new QuickDB();
 
@@ -34,7 +38,7 @@ client.on('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     await rest.put(
       Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: [setpointsCommand.toJSON()] }
+      { body: [setpointsCommand.toJSON(), checkpointsCommand.toJSON()] }
     );
   } else {
     console.warn('Skipping slash registration: CLIENT_ID or GUILD_ID undefined.');
@@ -83,6 +87,12 @@ client.on('interactionCreate', async interaction => {
     const overridePoints = interaction.options.getInteger('points');
     await db.set(`points.${targetUser.id}`, overridePoints);
     await interaction.reply({ content: `🔧 Set <@${targetUser.id}>'s points to **${overridePoints}**.`, ephemeral: true });
+  }
+  if (interaction.commandName === 'checkpoints') {
+    const userId = interaction.user.id;
+    const points = (await db.get(`points.${userId}`)) || 0;
+    const plural = points === 1 ? 'point' : 'points';
+    await interaction.reply({ content: `You have **${points}** ${plural}.`, ephemeral: true });
   }
 });
 
