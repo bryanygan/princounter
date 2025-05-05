@@ -25,6 +25,15 @@ const checkpointsCommand = new SlashCommandBuilder()
     option.setName('user')
       .setDescription('Optional: user to check points for')
       .setRequired(false));
+
+// Define slash command for showing the leaderboard
+const leaderboardCommand = new SlashCommandBuilder()
+  .setName('leaderboard')
+  .setDescription('Show top point earners')
+  .addIntegerOption(option =>
+    option.setName('limit')
+      .setDescription('Number of users to display (default 10)')
+      .setRequired(false));
 const { QuickDB } = require('quick.db');
 const db = new QuickDB();
 
@@ -42,7 +51,7 @@ client.on('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     await rest.put(
       Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: [setpointsCommand.toJSON(), checkpointsCommand.toJSON()] }
+      { body: [setpointsCommand.toJSON(), checkpointsCommand.toJSON(), leaderboardCommand.toJSON()] }
     );
   } else {
     console.warn('Skipping slash registration: CLIENT_ID or GUILD_ID undefined.');
@@ -102,6 +111,26 @@ client.on('interactionCreate', async interaction => {
     const plural = points === 1 ? 'point' : 'points';
     const mention = targetUser.id === interaction.user.id ? 'You have' : `<@${targetUser.id}> has`;
     await interaction.reply({ content: `${mention} **${points}** ${plural}.`, flags: MessageFlags.Ephemeral });
+  }
+
+  if (interaction.commandName === 'leaderboard') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.reply({ content: '❌ You do not have permission to view the leaderboard.', flags: MessageFlags.Ephemeral });
+    }
+    const limit = interaction.options.getInteger('limit') || 10;
+    const allPoints = (await db.get('points')) || {};
+    const entries = Object.entries(allPoints)
+      .map(([id, pts]) => ({ id, pts }))
+      .sort((a, b) => b.pts - a.pts)
+      .slice(0, limit);
+    if (entries.length === 0) {
+      return interaction.reply({ content: 'No points have been recorded yet.', flags: MessageFlags.Ephemeral });
+    }
+    const lines = entries.map((e, i) => {
+      const word = e.pts === 1 ? 'point' : 'points';
+      return `${i + 1}. <@${e.id}> — ${e.pts} ${word}`;
+    });
+    await interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
   }
 });
 
