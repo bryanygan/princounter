@@ -34,6 +34,47 @@ const leaderboardCommand = new SlashCommandBuilder()
     option.setName('limit')
       .setDescription('Number of users to display (default 10)')
       .setRequired(false));
+
+// Define slash command for backfilling points from message history
+const backfillCommand = new SlashCommandBuilder()
+  .setName('backfill')
+  .setDescription('Backfill points from existing messages in the channel')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+// Define slash command for clearing points
+const clearpointsCommand = new SlashCommandBuilder()
+  .setName('clearpoints')
+  .setDescription('Clear points for a user or all users')
+  .addUserOption(option =>
+    option.setName('user')
+      .setDescription('Optional: user to clear points for')
+      .setRequired(false))
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+// Function to traverse channel history and increment points for image attachments
+async function backfillChannelPoints(channel) {
+  let lastId = null;
+  let processed = 0;
+  while (true) {
+    const options = { limit: 100 };
+    if (lastId) options.before = lastId;
+    const batch = await channel.messages.fetch(options);
+    if (!batch.size) break;
+    for (const msg of batch.values()) {
+      if (msg.attachments.some(att => att.contentType?.startsWith('image/'))) {
+        const uid = msg.author.id;
+        const cur = (await db.get(`points.${uid}`)) || 0;
+        await db.set(`points.${uid}`, cur + 1);
+      }
+    }
+    processed += batch.size;
+    lastId = batch.last().id;
+    // avoid rate limits
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return processed;
+}
+
 const { QuickDB } = require('quick.db');
 const db = new QuickDB();
 
@@ -51,7 +92,7 @@ client.on('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     await rest.put(
       Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: [setpointsCommand.toJSON(), checkpointsCommand.toJSON(), leaderboardCommand.toJSON()] }
+      { body: [setpointsCommand.toJSON(), checkpointsCommand.toJSON(), leaderboardCommand.toJSON(), backfillCommand.toJSON(), clearpointsCommand.toJSON()] }
     );
   } else {
     console.warn('Skipping slash registration: CLIENT_ID or GUILD_ID undefined.');
@@ -131,6 +172,33 @@ client.on('interactionCreate', async interaction => {
       return `${i + 1}. <@${e.id}> — ${e.pts} ${word}`;
     });
     await interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
+  }
+
+  if (interaction.commandName === 'backfill') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.reply({ content: '❌ You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const channel = client.channels.cache.get(TARGET_CHANNEL_ID);
+    if (!channel || !channel.isTextBased?.()) {
+      return interaction.followUp({ content: '❌ Target channel not found or unsupported.', flags: MessageFlags.Ephemeral });
+    }
+    const total = await backfillChannelPoints(channel);
+    await interaction.followUp({ content: `✅ Processed **${total}** messages and updated points.`, flags: MessageFlags.Ephemeral });
+  }
+
+  if (interaction.commandName === 'clearpoints') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.reply({ content: '❌ You do not have permission to clear points.', flags: MessageFlags.Ephemeral });
+    }
+    const targetUser = interaction.options.getUser('user');
+    if (targetUser) {
+      await db.set(`points.${targetUser.id}`, 0);
+      return interaction.reply({ content: `✅ Cleared points for <@${targetUser.id}>.`, flags: MessageFlags.Ephemeral });
+    } else {
+      await db.set('points', {});
+      return interaction.reply({ content: '✅ Cleared points for all users.', flags: MessageFlags.Ephemeral });
+    }
   }
 });
 
