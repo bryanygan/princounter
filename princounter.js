@@ -16,7 +16,7 @@ const setpointsCommand = new SlashCommandBuilder()
     option.setName('points')
       .setDescription('Number of points to set')
       .setRequired(true))
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 // Define slash command for checking user’s points
 const checkpointsCommand = new SlashCommandBuilder()
   .setName('checkpoints')
@@ -49,7 +49,7 @@ const clearpointsCommand = new SlashCommandBuilder()
     option.setName('user')
       .setDescription('Optional: user to clear points for')
       .setRequired(false))
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 // Function to traverse channel history and increment points for image attachments
 async function backfillChannelPoints(channel) {
@@ -134,7 +134,7 @@ client.on('messageCreate', async message => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName === 'setpoints') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({ content: '❌ You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
     }
     const targetUser = interaction.options.getUser('user');
@@ -183,12 +183,17 @@ client.on('interactionCreate', async interaction => {
     if (!channel || !channel.isTextBased?.()) {
       return interaction.followUp({ content: '❌ Target channel not found or unsupported.', flags: MessageFlags.Ephemeral });
     }
+    // Check bot permissions in target channel
+    const perms = channel.permissionsFor(client.user);
+    if (!perms?.has(PermissionFlagsBits.ViewChannel) || !perms?.has(PermissionFlagsBits.ReadMessageHistory)) {
+      return interaction.followUp({ content: "❌ I need View Channel and Read Message History permissions to backfill this channel.", flags: MessageFlags.Ephemeral });
+    }
     const total = await backfillChannelPoints(channel);
     await interaction.followUp({ content: `✅ Processed **${total}** messages and updated points.`, flags: MessageFlags.Ephemeral });
   }
 
   if (interaction.commandName === 'clearpoints') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({ content: '❌ You do not have permission to clear points.', flags: MessageFlags.Ephemeral });
     }
     const targetUser = interaction.options.getUser('user');
