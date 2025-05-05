@@ -82,7 +82,7 @@ client.on('interactionCreate', async interaction => {
     const targetUser = interaction.options.getUser('user');
     const overridePoints = interaction.options.getInteger('points');
     await db.set(`points.${targetUser.id}`, overridePoints);
-    await interaction.reply(`🔧 Set <@${targetUser.id}>'s points to **${overridePoints}**.`);
+    await interaction.reply({ content: `🔧 Set <@${targetUser.id}>'s points to **${overridePoints}**.`, ephemeral: true });
   }
 });
 
