@@ -1,6 +1,22 @@
 require('dotenv').config();
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID;
 const TARGET_CHANNEL_ID = process.env.CHANNEL_ID;
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+
+// Define slash command for point overrides
+const setpointsCommand = new SlashCommandBuilder()
+  .setName('setpoints')
+  .setDescription('Override a user’s points')
+  .addUserOption(option =>
+    option.setName('user')
+      .setDescription('The user to set points for')
+      .setRequired(true))
+  .addIntegerOption(option =>
+    option.setName('points')
+      .setDescription('Number of points to set')
+      .setRequired(true))
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 const { QuickDB } = require('quick.db');
 const db = new QuickDB();
 
@@ -13,6 +29,16 @@ const client = new Client({
 });
 
 client.on('ready', async () => {
+  // Register slash commands if IDs are set
+  if (CLIENT_ID && GUILD_ID) {
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: [setpointsCommand.toJSON()] }
+    );
+  } else {
+    console.warn('Skipping slash registration: CLIENT_ID or GUILD_ID undefined.');
+  }
   const existing = await db.get('points');
   if (!existing) {
     await db.set('points', {});
@@ -44,6 +70,19 @@ client.on('messageCreate', async message => {
     // Send reply
     const pointWord = newPoints === 1 ? 'point' : 'points';
     await message.reply(`🎉 <@${userId}> earned 1 point. They now have **${newPoints}** ${pointWord} total.`);
+  }
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName === 'setpoints') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.reply({ content: '❌ You do not have permission to use this command.', ephemeral: true });
+    }
+    const targetUser = interaction.options.getUser('user');
+    const overridePoints = interaction.options.getInteger('points');
+    await db.set(`points.${targetUser.id}`, overridePoints);
+    await interaction.reply(`🔧 Set <@${targetUser.id}>'s points to **${overridePoints}**.`);
   }
 });
 
