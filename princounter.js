@@ -51,6 +51,23 @@ const clearpointsCommand = new SlashCommandBuilder()
       .setRequired(false))
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
+const redeemCommand = new SlashCommandBuilder()
+  .setName('redeem')
+  .setDescription('Redeem points for a reward')
+  .addUserOption(option =>
+    option.setName('user')
+      .setDescription('The user to redeem points for')
+      .setRequired(true))
+  .addStringOption(option =>
+    option.setName('reward')
+      .setDescription('Reward to redeem')
+      .setRequired(true)
+      .addChoices(
+        { name: 'Free Order', value: 'Free Order' },
+        { name: 'Perm Fee',    value: 'Perm Fee'   }
+      ))
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+
 // Function to traverse channel history and increment points for image attachments
 async function backfillChannelPoints(channel) {
   let lastId = null;
@@ -92,7 +109,7 @@ client.on('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     await rest.put(
       Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: [setpointsCommand.toJSON(), checkpointsCommand.toJSON(), leaderboardCommand.toJSON(), backfillCommand.toJSON(), clearpointsCommand.toJSON()] }
+      { body: [setpointsCommand.toJSON(), checkpointsCommand.toJSON(), leaderboardCommand.toJSON(), backfillCommand.toJSON(), clearpointsCommand.toJSON(), redeemCommand.toJSON()] }
     );
   } else {
     console.warn('Skipping slash registration: CLIENT_ID or GUILD_ID undefined.');
@@ -221,6 +238,29 @@ client.on('interactionCreate', async interaction => {
       await db.set('points', {});
       return interaction.reply({ content: '✅ Cleared points for all users.', flags: MessageFlags.Ephemeral });
     }
+  }
+
+  if (interaction.commandName === 'redeem') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: '❌ You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+    }
+    const targetUser = interaction.options.getUser('user');
+    const reward = interaction.options.getString('reward');
+    const userId = targetUser.id;
+    const currentPoints = (await db.get(`points.${userId}`)) || 0;
+    if (currentPoints < 10) {
+      return interaction.reply({ content: `❌ <@${userId}> needs at least 10 points to redeem.`, flags: MessageFlags.Ephemeral });
+    }
+    const newPoints = currentPoints - 10;
+    await db.set(`points.${userId}`, newPoints);
+
+    let replyMessage = `✅ Redeemed **${reward}** for <@${userId}>. They now have **${newPoints}** points.`;
+    if (reward === 'Perm Fee') {
+      const guildMember = await interaction.guild.members.fetch(userId);
+      await guildMember.roles.add('1371247728646033550');
+      replyMessage += ' They have been granted the VIP role.';
+    }
+    return interaction.reply({ content: replyMessage, flags: MessageFlags.Ephemeral });
   }
 });
 
