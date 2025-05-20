@@ -143,25 +143,36 @@ client.on('messageCreate', async message => {
   // Only process messages in the specified channel
   if (message.channel.id !== TARGET_CHANNEL_ID) return;
 
+  // Check bot send-message permission
+  const channelPerms = message.channel.permissionsFor(client.user);
+  if (!channelPerms?.has(PermissionFlagsBits.SendMessages)) {
+    console.error(`[Points] Missing SendMessages permission in channel ${message.channel.id}`);
+    return;
+  }
+
   // Check for image attachments
-  const imageAttachments = message.attachments.filter(attachment => 
+  const imageAttachments = message.attachments.filter(attachment =>
     attachment.contentType?.startsWith('image/')
   );
 
   if (imageAttachments.size > 0) {
     const userId = message.author.id;
     const username = message.author.username;
-    
+
     // Get current points from database
     const currentPoints = (await db.get(`points.${userId}`)) || 0;
     const newPoints = currentPoints + 1;
-    
+
     // Update database
     await db.set(`points.${userId}`, newPoints);
 
     // Send reply
     const pointWord = newPoints === 1 ? 'point' : 'points';
-    await message.reply(`🎉 <@${userId}> earned 1 point. They now have **${newPoints}** ${pointWord} total.`);
+    try {
+      await message.reply(`🎉 <@${userId}> earned 1 point. They now have **${newPoints}** ${pointWord} total.`);
+    } catch (err) {
+      console.error('[Points] Failed to send reply:', err);
+    }
   }
 });
 
