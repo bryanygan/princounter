@@ -2,7 +2,7 @@ require('dotenv').config();
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const TARGET_CHANNEL_ID = process.env.CHANNEL_ID;
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ActivityType } = require('discord.js');
 
 // Define slash command for point overrides
 const setpointsCommand = new SlashCommandBuilder()
@@ -101,6 +101,23 @@ client.on('ready', async () => {
   if (!existing) {
     await db.set('points', {});
   }
+  // rotate playing status
+  const statuses = [
+    { name: `70-80% off food!`, type: ActivityType.Playing },
+    { name: `discord.gg/zreats`, type: ActivityType.Watching },
+    { name: `Cheap food here!`, type: ActivityType.Listening },
+    { name: `Make a ticket!`, type: ActivityType.Competing },
+    { name: `Enjoy fast delivery!`, type: ActivityType.Playing },
+    { name: `prin was here`, type: ActivityType.Watching }
+  ];
+  let statusIndex = 0;
+  setInterval(() => {
+    client.user.setPresence({
+      activities: [statuses[statusIndex]],
+      status: 'online'
+    });
+    statusIndex = (statusIndex + 1) % statuses.length;
+  }, 15000);
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
