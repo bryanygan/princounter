@@ -3,6 +3,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const TARGET_CHANNEL_ID = process.env.CHANNEL_ID;
 const VIP_ROLE_ID = process.env.VIP_ROLE_ID || '1371247728646033550';
+const AUTO_ROLE_ID = '1350935336435449969'; // Role to give when posting images
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ActivityType } = require('discord.js');
 
 // Define slash command for point overrides
@@ -36,6 +37,7 @@ const leaderboardCommand = new SlashCommandBuilder()
     option.setName('limit')
       .setDescription('Number of users to display (default 10)')
       .setRequired(false));
+  // Removed: .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
 // Define slash command for backfilling points from message history
 const backfillCommand = new SlashCommandBuilder()
@@ -229,6 +231,7 @@ client.on('ready', async () => {
   console.log(`🚀 Logged in as ${client.user.tag}!`);
   console.log(`📍 Points channel: ${TARGET_CHANNEL_ID || 'Not configured'}`);
   console.log(`🎯 VIP Role ID: ${VIP_ROLE_ID}`);
+  console.log(`🎭 Auto Role ID: ${AUTO_ROLE_ID}`);
 });
 
 client.on('messageCreate', async message => {
@@ -257,9 +260,24 @@ client.on('messageCreate', async message => {
       // Add point using helper function
       const newPoints = await addUserPoints(userId, 1);
 
+      // Check if user needs the auto role
+      const guildMember = await message.guild.members.fetch(userId);
+      const autoRole = message.guild.roles.cache.get(AUTO_ROLE_ID);
+      
+      let roleMessage = '';
+      if (autoRole && !guildMember.roles.cache.has(AUTO_ROLE_ID)) {
+        try {
+          await guildMember.roles.add(autoRole);
+          roleMessage = ` You've been given the ${autoRole.name} role! 🎭`;
+          console.log(`🎭 ${username} (${userId}) was given the ${autoRole.name} role`);
+        } catch (roleError) {
+          console.error(`Failed to add auto role to ${username}:`, roleError);
+        }
+      }
+
       // Send reply
       const pointWord = newPoints === 1 ? 'point' : 'points';
-      await message.reply(`🎉 <@${userId}> earned 1 point. They now have **${newPoints}** ${pointWord} total.`);
+      await message.reply(`🎉 <@${userId}> earned 1 point. They now have **${newPoints}** ${pointWord} total.${roleMessage}`);
       
       console.log(`📈 ${username} (${userId}) earned 1 point. Total: ${newPoints}`);
     } catch (error) {
@@ -335,7 +353,9 @@ client.on('interactionCreate', async interaction => {
         break;
       }
 
-      case 'leaderboard': {        
+      case 'leaderboard': {
+        // REMOVED PERMISSION CHECK - Now everyone can use this command!
+        
         const limit = interaction.options.getInteger('limit') || 10;
         const entries = await getLeaderboard(limit);
         
