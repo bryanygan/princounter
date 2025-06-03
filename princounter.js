@@ -9,7 +9,7 @@ const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Permission
 // Define slash command for point overrides
 const setpointsCommand = new SlashCommandBuilder()
   .setName('setpoints')
-  .setDescription('Override a user\'s points') // Fixed: Escaped apostrophe
+  .setDescription('Override a user\'s points')
   .addUserOption(option =>
     option.setName('user')
       .setDescription('The user to set points for')
@@ -37,7 +37,6 @@ const leaderboardCommand = new SlashCommandBuilder()
     option.setName('limit')
       .setDescription('Number of users to display (default 10)')
       .setRequired(false));
-  // Removed: .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
 // Define slash command for backfilling points from message history
 const backfillCommand = new SlashCommandBuilder()
@@ -91,23 +90,58 @@ const addpointsCommand = new SlashCommandBuilder()
 const { QuickDB } = require('quick.db');
 const db = new QuickDB();
 
-// Database helper functions
+// IMPROVEMENT 1: Rate limiting and queue management
+const userCooldowns = new Map(); // Track user cooldowns
+const processingQueue = new Map(); // Track ongoing operations per user
+
+// IMPROVEMENT 2: Enhanced database helper functions with better concurrency
 async function getUserPoints(userId) {
   const allPoints = (await db.get('points')) || {};
   return allPoints[userId] || 0;
 }
 
 async function setUserPoints(userId, points) {
-  const allPoints = (await db.get('points')) || {};
-  allPoints[userId] = Math.max(0, points); // Ensure points can't go negative
-  await db.set('points', allPoints);
-  return allPoints[userId];
+  // IMPROVEMENT 3: Prevent concurrent modifications per user
+  const userKey = `points_${userId}`;
+  
+  // Wait if another operation is in progress for this user
+  while (processingQueue.has(userKey)) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  
+  processingQueue.set(userKey, true);
+  
+  try {
+    const allPoints = (await db.get('points')) || {};
+    allPoints[userId] = Math.max(0, points); // Ensure points can't go negative
+    await db.set('points', allPoints);
+    return allPoints[userId];
+  } finally {
+    processingQueue.delete(userKey);
+  }
 }
 
 async function addUserPoints(userId, pointsToAdd) {
-  const currentPoints = await getUserPoints(userId);
-  const newPoints = currentPoints + pointsToAdd;
-  return await setUserPoints(userId, newPoints);
+  // IMPROVEMENT 4: Atomic-like operation for adding points
+  const userKey = `points_${userId}`;
+  
+  // Wait if another operation is in progress for this user
+  while (processingQueue.has(userKey)) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  
+  processingQueue.set(userKey, true);
+  
+  try {
+    const allPoints = (await db.get('points')) || {};
+    const currentPoints = allPoints[userId] || 0;
+    const newPoints = currentPoints + pointsToAdd;
+    allPoints[userId] = Math.max(0, newPoints);
+    await db.set('points', allPoints);
+    return allPoints[userId];
+  } finally {
+    processingQueue.delete(userKey);
+  }
 }
 
 async function getLeaderboard(limit = 10) {
@@ -119,7 +153,22 @@ async function getLeaderboard(limit = 10) {
 }
 
 async function clearAllPoints() {
+  // IMPROVEMENT 5: Clear processing queue when clearing all points
+  processingQueue.clear();
   await db.set('points', {});
+}
+
+// IMPROVEMENT 6: Enhanced rate limiting function
+function isUserOnCooldown(userId, cooldownMs = 1000) {
+  const now = Date.now();
+  const lastAction = userCooldowns.get(userId);
+  
+  if (lastAction && (now - lastAction) < cooldownMs) {
+    return true;
+  }
+  
+  userCooldowns.set(userId, now);
+  return false;
 }
 
 // Function to traverse channel history and increment points for image attachments
@@ -128,12 +177,19 @@ async function backfillChannelPoints(channel, interaction) {
   let processed = 0;
   let pointsAwarded = 0;
   
+  // IMPROVEMENT 7: Batch processing for better performance
+  const batchSize = 50; // Reduced from 100 for better memory usage
+  
   while (true) {
-    const options = { limit: 100 };
+    const options = { limit: batchSize };
     if (lastId) options.before = lastId;
     
     const batch = await channel.messages.fetch(options);
     if (!batch.size) break;
+    
+    // IMPROVEMENT 8: Process messages in parallel with concurrency limit
+    const messagePromises = [];
+    const concurrencyLimit = 5; // Process max 5 messages at once
     
     for (const msg of batch.values()) {
       if (msg.author.bot) continue;
@@ -142,10 +198,24 @@ async function backfillChannelPoints(channel, interaction) {
       const hasImages = msg.attachments.some(att => att.contentType?.startsWith('image/'));
       
       if (hasImages) {
-        const userId = msg.author.id;
-        await addUserPoints(userId, 1);
-        pointsAwarded++;
+        messagePromises.push(
+          addUserPoints(msg.author.id, 1).then(() => {
+            pointsAwarded++;
+          }).catch(error => {
+            console.error(`Failed to add points for user ${msg.author.id}:`, error);
+          })
+        );
+        
+        // Process in batches to avoid overwhelming the database
+        if (messagePromises.length >= concurrencyLimit) {
+          await Promise.allSettled(messagePromises.splice(0, concurrencyLimit));
+        }
       }
+    }
+    
+    // Process remaining promises
+    if (messagePromises.length > 0) {
+      await Promise.allSettled(messagePromises);
     }
     
     processed += batch.size;
@@ -160,8 +230,8 @@ async function backfillChannelPoints(channel, interaction) {
       }
     }
     
-    // Rate limiting
-    await new Promise(r => setTimeout(r, 500));
+    // IMPROVEMENT 9: Shorter rate limiting for better responsiveness
+    await new Promise(r => setTimeout(r, 200));
   }
   
   return { processed, pointsAwarded };
@@ -240,6 +310,11 @@ client.on('messageCreate', async message => {
   // Only process messages in the specified channel
   if (!TARGET_CHANNEL_ID || message.channel.id !== TARGET_CHANNEL_ID) return;
 
+  // IMPROVEMENT 10: Rate limiting for message processing
+  if (isUserOnCooldown(message.author.id, 2000)) { // 2 second cooldown
+    return; // Silently ignore rapid-fire messages
+  }
+
   // Check bot send-message permission
   const channelPerms = message.channel.permissionsFor(client.user);
   if (!channelPerms?.has(PermissionFlagsBits.SendMessages)) {
@@ -257,19 +332,26 @@ client.on('messageCreate', async message => {
     const username = message.author.username;
 
     try {
-      // Add point using helper function
-      const newPoints = await addUserPoints(userId, 1);
-
+      // IMPROVEMENT 11: Parallel processing of points and role assignment
+      const pointsPromise = addUserPoints(userId, 1);
+      const memberPromise = message.guild.members.fetch(userId);
+      
+      const [newPoints, guildMember] = await Promise.all([pointsPromise, memberPromise]);
+      
       // Check if user needs the auto role
-      const guildMember = await message.guild.members.fetch(userId);
       const autoRole = message.guild.roles.cache.get(AUTO_ROLE_ID);
       
       let roleMessage = '';
       if (autoRole && !guildMember.roles.cache.has(AUTO_ROLE_ID)) {
         try {
-          await guildMember.roles.add(autoRole);
+          // Don't await role assignment to avoid blocking the response
+          guildMember.roles.add(autoRole).then(() => {
+            console.log(`🎭 ${username} (${userId}) was given the ${autoRole.name} role`);
+          }).catch(roleError => {
+            console.error(`Failed to add auto role to ${username}:`, roleError);
+          });
+          
           roleMessage = ` You've been given the ${autoRole.name} role! 🎭`;
-          console.log(`🎭 ${username} (${userId}) was given the ${autoRole.name} role`);
         } catch (roleError) {
           console.error(`Failed to add auto role to ${username}:`, roleError);
         }
@@ -288,6 +370,14 @@ client.on('messageCreate', async message => {
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
+
+  // IMPROVEMENT 12: Rate limiting for interactions
+  if (isUserOnCooldown(`interaction_${interaction.user.id}`, 1000)) {
+    return interaction.reply({ 
+      content: '⏰ Please wait a moment before using another command.', 
+      flags: MessageFlags.Ephemeral 
+    });
+  }
 
   try {
     switch (interaction.commandName) {
@@ -354,8 +444,6 @@ client.on('interactionCreate', async interaction => {
       }
 
       case 'leaderboard': {
-        // REMOVED PERMISSION CHECK - Now everyone can use this command!
-        
         const limit = interaction.options.getInteger('limit') || 10;
         const entries = await getLeaderboard(limit);
         
@@ -379,7 +467,7 @@ client.on('interactionCreate', async interaction => {
             const word = entry.points === 1 ? 'point' : 'points';
             return `${index + 1}. <@${entry.userId}> — ${entry.points} ${word}`;
           });
-          const shortMessage = shortLines.join('\n');
+          let shortMessage = shortLines.join('\n');
           if (entries.length > 10) {
             shortMessage += `\n... and ${entries.length - 10} more users`;
           }
@@ -500,7 +588,6 @@ client.on('interactionCreate', async interaction => {
           }
         }
         
-        // Changed to public message (removed ephemeral flag)
         await interaction.reply(replyMessage);
         break;
       }
@@ -521,13 +608,33 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Error handling
+// IMPROVEMENT 13: Enhanced error handling
 client.on('error', error => {
   console.error('Discord client error:', error);
 });
 
 process.on('unhandledRejection', error => {
   console.error('Unhandled promise rejection:', error);
+});
+
+// IMPROVEMENT 14: Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('🛑 Shutting down gracefully...');
+  
+  // Wait for ongoing operations to complete
+  const maxWait = 5000; // 5 seconds
+  const startTime = Date.now();
+  
+  while (processingQueue.size > 0 && (Date.now() - startTime) < maxWait) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  if (processingQueue.size > 0) {
+    console.warn(`⚠️ ${processingQueue.size} operations still pending during shutdown`);
+  }
+  
+  client.destroy();
+  process.exit(0);
 });
 
 client.login(process.env.DISCORD_TOKEN);
