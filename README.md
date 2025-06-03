@@ -1,4 +1,4 @@
-# Enhanced Princounter Bot
+# Counter Bot
 
 A comprehensive Discord.js bot that tracks and manages user points based on image posts in a designated channel, with advanced administration features and reward redemption system.
 
@@ -54,8 +54,8 @@ A comprehensive Discord.js bot that tracks and manages user points based on imag
 ### Quick Setup
 ```bash
 # Clone this repository
-git clone https://github.com/yourusername/enhanced-princounter.git
-cd enhanced-princounter
+git clone https://github.com/bryanygan/princounter.git
+cd princounter
 
 # Install dependencies
 npm install
@@ -66,8 +66,8 @@ If you prefer to set up manually:
 
 ```bash
 # Create project directory
-mkdir enhanced-princounter
-cd enhanced-princounter
+mkdir princounter
+cd princounter
 
 # Initialize npm project
 npm init -y
@@ -300,7 +300,7 @@ Current rewards available:
 ## File Structure
 
 ```
-enhanced-princounter/
+princounter/
 ├── princounter.js         # Main bot file
 ├── package.json          # Dependencies and scripts
 ├── package-lock.json     # Dependency lock file
@@ -333,8 +333,8 @@ We welcome contributions! Here's how to help:
 
 ### Development Setup
 ```bash
-git clone https://github.com/yourusername/enhanced-princounter.git
-cd enhanced-princounter
+git clone https://github.com/yourusername/princounter.git
+cd princounter
 npm install
 cp .env.example .env  # Create and configure your .env file
 ```
