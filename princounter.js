@@ -28,15 +28,14 @@ const checkpointsCommand = new SlashCommandBuilder()
       .setDescription('Optional: user to check points for')
       .setRequired(false));
 
-// Define slash command for showing the leaderboard
+// Define slash command for showing the leaderboard - NOW PUBLIC!
 const leaderboardCommand = new SlashCommandBuilder()
   .setName('leaderboard')
   .setDescription('Show top point earners')
   .addIntegerOption(option =>
     option.setName('limit')
       .setDescription('Number of users to display (default 10)')
-      .setRequired(false))
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+      .setRequired(false));
 
 // Define slash command for backfilling points from message history
 const backfillCommand = new SlashCommandBuilder()
@@ -336,14 +335,7 @@ client.on('interactionCreate', async interaction => {
         break;
       }
 
-      case 'leaderboard': {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ 
-            content: '❌ You do not have permission to view the leaderboard.', 
-            flags: MessageFlags.Ephemeral 
-          });
-        }
-        
+      case 'leaderboard': {        
         const limit = interaction.options.getInteger('limit') || 10;
         const entries = await getLeaderboard(limit);
         
