@@ -67,7 +67,7 @@ const redeemCommand = new SlashCommandBuilder()
       .setDescription('Reward to redeem')
       .setRequired(true)
       .addChoices(
-        { name: 'Free Order', value: 'Free Order' },
+        { name: 'Free Fee Order', value: 'Free Fee Order' },
         { name: 'Perm Fee', value: 'Perm Fee' }
       ))
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
