@@ -138,7 +138,7 @@ async function addUserPoints(userId, pointsToAdd) {
     const newPoints = currentPoints + pointsToAdd;
     allPoints[userId] = Math.max(0, newPoints);
     await db.set('points', allPoints);
-    return allPoints[userId];
+    return { previousPoints: currentPoints, newPoints: allPoints[userId] };
   } finally {
     processingQueue.delete(userKey);
   }
@@ -333,10 +333,11 @@ client.on('messageCreate', async message => {
 
     try {
       // IMPROVEMENT 11: Parallel processing of points and role assignment
-      const pointsPromise = addUserPoints(userId, 1);
+      const pointsResult = await addUserPoints(userId, 1);
       const memberPromise = message.guild.members.fetch(userId);
       
-      const [newPoints, guildMember] = await Promise.all([pointsPromise, memberPromise]);
+      const [guildMember] = await Promise.all([memberPromise]);
+      const { previousPoints, newPoints } = pointsResult;
       
       // Check if user needs the auto role
       const autoRole = message.guild.roles.cache.get(AUTO_ROLE_ID);
@@ -357,11 +358,17 @@ client.on('messageCreate', async message => {
         }
       }
 
+      // Check if user just reached 10 points
+      let redemptionMessage = '';
+      if (previousPoints < 10 && newPoints >= 10) {
+        redemptionMessage = '\n\n🎁 You now have enough points to redeem a prize! Check out your options here: https://discord.com/channels/1350935336435449967/1350935336435449973/1369303402705846414';
+      }
+
       // Send reply
       const pointWord = newPoints === 1 ? 'point' : 'points';
-      await message.reply(`🎉 <@${userId}> earned 1 point. They now have **${newPoints}** ${pointWord} total.${roleMessage}`);
+      await message.reply(`🎉 <@${userId}> earned 1 point. They now have **${newPoints}** ${pointWord} total.${roleMessage}${redemptionMessage}`);
       
-      console.log(`📈 ${username} (${userId}) earned 1 point. Total: ${newPoints}`);
+      console.log(`📈 ${username} (${userId}) earned 1 point. Total: ${newPoints}${previousPoints < 10 && newPoints >= 10 ? ' [REACHED 10 POINTS]' : ''}`);
     } catch (error) {
       console.error('[Points] Failed to process points:', error);
     }
@@ -412,7 +419,8 @@ client.on('interactionCreate', async interaction => {
         const targetUser = interaction.options.getUser('user');
         const pointsToAdd = interaction.options.getInteger('points');
         
-        const newPoints = await addUserPoints(targetUser.id, pointsToAdd);
+        const pointsResult = await addUserPoints(targetUser.id, pointsToAdd);
+        const newPoints = pointsResult.newPoints;
         
         await interaction.reply({ 
           content: `➕ Added **${pointsToAdd}** points to <@${targetUser.id}>. They now have **${newPoints}** points.`, 
