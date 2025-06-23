@@ -152,6 +152,12 @@ async function getLeaderboard(limit = 10) {
     .slice(0, limit);
 }
 
+// NEW: Function to get total points across all users
+async function getTotalPoints() {
+  const allPoints = (await db.get('points')) || {};
+  return Object.values(allPoints).reduce((sum, points) => sum + points, 0);
+}
+
 async function clearAllPoints() {
   // IMPROVEMENT 5: Clear processing queue when clearing all points
   processingQueue.clear();
@@ -245,6 +251,46 @@ const client = new Client({
   ]
 });
 
+// NEW: Function to update bot status with rotating messages including total vouches
+async function updateBotStatus() {
+  try {
+    const totalVouches = await getTotalPoints();
+    
+    const statuses = [
+      { name: `70-80% off food!`, type: ActivityType.Playing },
+      { name: `discord.gg/zreats`, type: ActivityType.Watching },
+      { name: `Total Vouches: ${totalVouches}`, type: ActivityType.Watching }
+    ];
+    
+    let statusIndex = 0;
+    
+    // Set initial status
+    client.user.setPresence({
+      activities: [statuses[statusIndex]],
+      status: 'online'
+    });
+    
+    // Update status every 15 seconds
+    setInterval(async () => {
+      statusIndex = (statusIndex + 1) % statuses.length;
+      
+      // If we're about to show the total vouches status, refresh the count
+      if (statuses[statusIndex].name.startsWith('Total Vouches:')) {
+        const currentTotal = await getTotalPoints();
+        statuses[statusIndex].name = `Total Vouches: ${currentTotal}`;
+      }
+      
+      client.user.setPresence({
+        activities: [statuses[statusIndex]],
+        status: 'online'
+      });
+    }, 15000);
+    
+  } catch (error) {
+    console.error('Error updating bot status:', error);
+  }
+}
+
 client.on('ready', async () => {
   // Register slash commands if IDs are set
   if (CLIENT_ID && GUILD_ID) {
@@ -279,29 +325,17 @@ client.on('ready', async () => {
     console.log('📊 Initialized points database');
   }
   
-  // Rotate playing status
-  const statuses = [
-    { name: `70-80% off food!`, type: ActivityType.Playing },
-    { name: `discord.gg/zreats`, type: ActivityType.Watching },
-    { name: `Cheap food here!`, type: ActivityType.Listening },
-    { name: `Make a ticket!`, type: ActivityType.Competing },
-    { name: `Enjoy fast delivery!`, type: ActivityType.Playing },
-    { name: `prin was here`, type: ActivityType.Watching }
-  ];
-  
-  let statusIndex = 0;
-  setInterval(() => {
-    client.user.setPresence({
-      activities: [statuses[statusIndex]],
-      status: 'online'
-    });
-    statusIndex = (statusIndex + 1) % statuses.length;
-  }, 15000);
+  // Start rotating status with total vouches
+  await updateBotStatus();
   
   console.log(`🚀 Logged in as ${client.user.tag}!`);
   console.log(`📍 Points channel: ${TARGET_CHANNEL_ID || 'Not configured'}`);
   console.log(`🎯 VIP Role ID: ${VIP_ROLE_ID}`);
   console.log(`🎭 Auto Role ID: ${AUTO_ROLE_ID}`);
+  
+  // Log initial total vouches
+  const totalVouches = await getTotalPoints();
+  console.log(`📊 Current total vouches: ${totalVouches}`);
 });
 
 client.on('messageCreate', async message => {
